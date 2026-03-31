@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>OneiroLib | 梦境图书馆</title>
+    <style>
+        :root {
+            --dream-green: rgba(5, 10, 15, 0.95); 
+            --border-glow: rgba(255, 255, 255, 0.12);
+            --text-accent: #e0f0f8; 
+        }
+
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: radial-gradient(circle at center, #0a121a 0%, #000000 100%); overflow: hidden; font-family: "PingFang SC", "Hiragino Sans GB", serif; color: #fff; }
+        
+        #shader-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+
+        .view-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.8s ease;
+        }
+        .view-layer.active { opacity: 1; pointer-events: auto; }
+
+        /* ====== 首页 UI ====== */
+        header { position: absolute; top: 10%; text-align: center; color: rgba(255,255,255,0.8); }
+        h1 { font-weight: 100; letter-spacing: 12px; margin-bottom: 5px; text-transform: uppercase; text-shadow: 0 0 20px rgba(0,255,100,0.1); }
+        .h1-zh { font-size: 14px; color: rgba(255,255,255,0.4); letter-spacing: 8px; font-weight: 200; margin-top: -10px; margin-bottom: 5px; }
+
+        .controls { position: absolute; bottom: 8%; display: flex; gap: 40px; }
+        .btn {
+            color: rgba(255,255,255,0.7); font-size: 13px; letter-spacing: 2px;
+            cursor: pointer; border-bottom: 1px solid transparent; padding-bottom: 5px; transition: 0.4s;
+        }
+        .btn:hover { color: #fff; border-color: rgba(255,255,255,0.8); text-shadow: 0 0 10px rgba(255,255,255,0.3); }
+
+        /* ====== 录入圆窗 ====== */
+        #input-bubble {
+            visibility: hidden; pointer-events: none;
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9);
+            width: 80vw; height: 80vw; max-width: 550px; max-height: 550px;
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.03), transparent);
+            backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.9), inset 0 0 40px rgba(255,255,255,0.02);
+            z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); opacity: 0;
+        }
+        #input-bubble.active { visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); opacity: 1; }
+
+        .mood-selector { display: flex; gap: 15px; margin-bottom: 25px; }
+        .mood-dot { width: 15px; height: 15px; border-radius: 50%; cursor: pointer; box-shadow: 0 0 10px currentColor; opacity: 0.3; transition: 0.3s; border: 2px solid transparent; }
+        .mood-dot:hover, .mood-dot.active { opacity: 1; transform: scale(1.3); border-color: #fff; }
+
+        .intensity-wrapper { width: 50%; margin-bottom: 25px; text-align: center; }
+        .intensity-label { font-size: 10px; color: rgba(255,255,255,0.4); letter-spacing: 2px; margin-bottom: 12px; }
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 1px; background: rgba(255,255,255,0.15); }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 10px; width: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px #fff; margin-top: -5px; cursor: pointer; }
+
+        .input-title { font-size: 10px; letter-spacing: 3px; color: rgba(255,255,255,0.3); margin-bottom: 15px; }
+        .meta-input-row { display: flex; width: 65%; gap: 15px; margin-bottom: 20px; justify-content: center;}
+        
+        input[type="text"], input[type="date"] {
+            background: transparent; border: none; border-bottom: 1px solid rgba(255,255,255,0.15);
+            color: #fff; font-size: 14px; text-align: center; padding: 5px;
+            font-family: inherit; letter-spacing: 1px; outline: none; text-shadow: 0 0 5px rgba(0,0,0,0.8);
+        }
+        input[type="text"] { flex: 2; }
+        input[type="date"] { flex: 1; color: rgba(255,255,255,0.7); cursor: pointer; }
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.4; cursor: pointer; }
+        
+        textarea { background: transparent; border: none; outline: none; color: #fff; width: 75%; height: 25%; resize: none; font-size: 14px; line-height: 1.8; text-align: center; font-family: inherit; text-shadow: 0 0 5px rgba(0,0,0,0.8); }
+        input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.15); }
+
+        /* ====== 全局音量控制 (新增) ====== */
+        #volume-widget {
+            position: fixed; bottom: 8%; right: 5%; z-index: 50;
+            display: flex; align-items: center; gap: 15px; 
+            opacity: 0.3; transition: opacity 0.4s ease;
+        }
+        #volume-widget:hover { opacity: 1; }
+        .vol-label { font-size: 10px; letter-spacing: 3px; color: #fff; }
+        #bgm-volume { width: 80px; }
+
+        /* ====== 图书馆内部及切换控制 ====== */
+        .lib-header { position: absolute; top: 5%; width: 90%; display: flex; justify-content: space-between; align-items: center; z-index: 20;}
+        .lib-title { font-weight: 200; letter-spacing: 5px; font-size: 14px; opacity: 0.6;}
+        
+        .view-toggles { display: flex; gap: 30px; align-items: center; }
+        .toggle-btn { font-size: 11px; letter-spacing: 2px; color: rgba(255,255,255,0.3); cursor: pointer; transition: 0.3s; padding-bottom: 3px; border-bottom: 1px solid transparent; }
+        .toggle-btn.active { color: #fff; border-color: rgba(255,255,255,0.6); text-shadow: 0 0 8px rgba(255,255,255,0.5); }
+        .toggle-btn:hover { color: rgba(255,255,255,0.8); }
+
+        #library-grid { width: 85%; height: 75%; display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; align-content: center; z-index: 10; position: relative; transition: opacity 0.3s ease; opacity: 1; }
+
+        @keyframes floatHover {
+            0% { transform: translateY(0px) scale(1); }
+            50% { transform: translateY(-12px) scale(1.02); }
+            100% { transform: translateY(0px) scale(1); }
+        }
+
+        .lib-bubble {
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.15);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+            cursor: pointer; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); 
+            animation: floatHover 5s ease-in-out infinite; filter: blur(0.8px); opacity: 0.6;
+            will-change: transform, filter, opacity;
+        }
+        .lib-bubble:hover { filter: blur(0px) !important; opacity: 1 !important; transform: scale(1.08) !important; border-color: rgba(255,255,255,0.8) !important; }
+        
+        .b-date, .b-key { white-space: nowrap; }
+        .b-date { font-size: 10px; opacity: 0.6; letter-spacing: 1px; margin-bottom: 8px; font-family: monospace; color: #fff; }
+        .b-key { font-size: 14px; font-weight: 300; letter-spacing: 2px; color: #fff; text-shadow: 0 0 10px rgba(0,0,0,0.8); padding: 0 10px;}
+
+        .lib-bubble:nth-child(even) { animation-duration: 6s; animation-delay: 1s; }
+        .lib-bubble:nth-child(3n) { animation-duration: 7s; animation-delay: 2s; }
+
+        /* ====== 详情档案圆形窗 ====== */
+        #archive-card {
+            visibility: hidden; pointer-events: none; 
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) translateZ(0) scale(0.9);
+            width: 80vw; height: 80vw; max-width: 500px; max-height: 500px;
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.05), rgba(5, 10, 15, 0.95)); 
+            backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+            border-radius: 50%; border: 1px solid var(--border-glow);
+            padding: 50px; color: var(--text-accent); z-index: 110;
+            box-shadow: 0 0 80px rgba(0,0,0,0.95);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: visibility 0.5s, opacity 0.5s, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.5s; 
+            opacity: 0;
+        }
+        #archive-card.active { visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) translateZ(0) scale(1); opacity: 1; }
+        
+        .card-header { position: absolute; top: 18%; width: 65%; display: flex; justify-content: space-between; align-items: center; z-index: 10; transition: opacity 0.3s; }
+        .btn-delete { color: rgba(255,255,255,0.5); font-size: 11px; opacity: 0.5; cursor: pointer; letter-spacing: 1px; transition: 0.3s; }
+        .btn-delete:hover { opacity: 1; text-shadow: 0 0 10px rgba(255,255,255,0.4); color: #ff9999; }
+        .btn-close { cursor: pointer; opacity: 0.4; font-size: 12px; letter-spacing: 1px; transition: 0.3s; }
+        .btn-close:hover { opacity: 1; }
+        
+        #card-keyword { font-weight: 200; color: #fff; letter-spacing: 4px; margin-bottom: 5px; margin-top: 40px; }
+        #card-meta { font-size: 10px; color: rgba(255,255,255,0.3); letter-spacing: 2px; font-family: monospace; }
+        
+        #card-text {
+            width: 70%; max-height: 40%; resize: none; font-size: 14px; line-height: 2; text-align: center;
+            font-family: inherit; letter-spacing: 1px; color: #d0d5d0; margin-top: 15px; margin-bottom: 20px;
+            overflow-y: auto; padding-right: 5px; 
+        }
+        #card-text::-webkit-scrollbar { width: 1px; }
+        #card-text::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); }
+
+        #archive-card span.particle { display: inline-block; white-space: pre; }
+    </style>
+</head>
+<body>
+
+    <audio id="bgm" loop>
+        <source src="dream.mp3" type="audio/mpeg">
+    </audio>
+
+    <div id="volume-widget">
+        <span class="vol-label">AUDIO</span>
+        <input type="range" id="bgm-volume" min="0" max="1" step="0.01" value="0.4">
+    </div>
+
+    <canvas id="shader-canvas"></canvas>
+
+    <div id="view-home" class="view-layer active">
+        <header>
+            <h1>OneiroLib</h1>
+            <div class="h1-zh">梦境图书馆</div>
+            <p style="font-size: 10px; letter-spacing: 4px; opacity: 0.5;">SUBSTANCE OF DREAMS</p>
+        </header>
+
+        <div id="input-bubble">
+            <div class="input-title" style="margin-top: -20px;">情绪感应 / TONE & INTENSITY</div>
+            <div class="mood-selector" id="mood-selector">
+                <div class="mood-dot active" data-color="0, 255, 150" style="color: #00ff96; background: #00ff96;" title="深绿"></div>
+                <div class="mood-dot" data-color="80, 200, 255" style="color: #50c8ff; background: #50c8ff;" title="幽蓝"></div>
+                <div class="mood-dot" data-color="200, 100, 255" style="color: #c864ff; background: #c864ff;" title="绛紫"></div>
+                <div class="mood-dot" data-color="255, 180, 50" style="color: #ffb432; background: #ffb432;" title="赤金"></div>
+                <div class="mood-dot" data-color="200, 200, 200" style="color: #c8c8c8; background: #c8c8c8;" title="灰白"></div>
+            </div>
+            
+            <div class="intensity-wrapper">
+                <div class="intensity-label">深刻程度 / INTENSITY</div>
+                <input type="range" id="dream-intensity" min="120" max="230" value="170">
+            </div>
+            
+            <div class="meta-input-row">
+                <input type="date" id="dream-date">
+                <input type="text" id="dream-keyword" placeholder="提取关键词...">
+            </div>
+            
+            <textarea id="dream-text" placeholder="闭上眼，描述那个瞬间的细节..."></textarea>
+            <div class="btn" style="margin-top: 20px; font-size: 11px;" onclick="saveDream()">[ 封存入库 ]</div>
+            <div style="position: absolute; top: 12%; right: 18%; cursor: pointer; opacity: 0.3;" onclick="toggleInput(false)">✕</div>
+        </div>
+
+        <div class="controls">
+            <div class="btn" onclick="toggleInput(true)">+ 捕获新梦境</div>
+            <div class="btn" onclick="switchView('view-library')">[ 潜入内部区 ]</div>
+        </div>
+    </div>
+
+    <div id="view-library" class="view-layer">
+        <div class="lib-header">
+            <div class="btn" onclick="switchView('view-home')">← 返回现世</div>
+            
+            <div class="view-toggles">
+                <div class="toggle-btn active" id="mode-time" onclick="setSortMode('time')">时间漫游 (TIMELINE)</div>
+                <div class="toggle-btn" id="mode-color" onclick="setSortMode('color')">情绪星团 (CLUSTERS)</div>
+            </div>
+
+            <div class="lib-title">INNER SANCTUM</div>
+        </div>
+        <div id="library-grid"></div>
+    </div>
+
+    <div id="archive-card">
+        <div class="card-header" id="card-controls">
+            <span class="btn-delete" onclick="deleteDream()">[ 抹除碎片 ]</span>
+            <span class="btn-close" onclick="hideArchive()">CLOSE ✕</span>
+        </div>
+        
+        <h3 id="card-keyword">关键词</h3>
+        <div id="card-meta">日期 | ID</div>
+        <div id="card-text">内容加载中...</div>
+    </div>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        precision highp float; uniform float iTime; uniform vec2 iResolution;
+        vec3 getMoodColor(float index) {
+            float m = mod(index, 5.0);
+            if(m < 1.0) return vec3(0.00, 0.18, 0.12); if(m < 2.0) return vec3(0.08, 0.12, 0.25);
+            if(m < 3.0) return vec3(0.15, 0.08, 0.25); if(m < 4.0) return vec3(0.18, 0.10, 0.03); return vec3(0.12, 0.12, 0.12);
+        }
+        void main() {
+            vec2 uv = (2.0 * gl_FragCoord.xy - iResolution.xy) / iResolution.y;
+            vec3 color = vec3(0.03, 0.04, 0.05) + 0.02 * uv.y; 
+            for( int i=0; i<35; i++ ) {
+                float pha = sin(float(i)*546.13+1.0)*0.5 + 0.5; float siz = pow( sin(float(i)*651.74+5.0)*0.5 + 0.5, 4.0 );
+                float pox = sin(float(i)*321.55+4.1) * iResolution.x / iResolution.y;
+                float rad = 0.05 + 0.45 * siz; vec2 pos = vec2( pox, -1.0-rad + (2.0+2.0*rad)*mod(pha+0.03*iTime*(0.1+0.5*siz),1.0));
+                float dis = length( uv - pos );
+                vec3 col = getMoodColor(float(i));
+                float f = length(uv-pos)/rad; f = sqrt(clamp(1.0-f*f,0.0,1.0));
+                color += col *(1.0-smoothstep( rad*0.96, rad, dis )) * f * 0.85;
+            }
+            color *= sqrt(1.5-0.5*length(uv)); gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('shader-canvas'); const gl = canvas.getContext('webgl');
+        const shaderSource = document.getElementById('fragmentShader').text;
+        function createShader(gl, type, source) { const shader = gl.createShader(type); gl.shaderSource(shader, source); gl.compileShader(shader); return shader; }
+        const program = gl.createProgram(); const vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs, 'attribute vec2 p; void main(){ gl_Position=vec4(p,0,1); }'); gl.compileShader(vs);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, shaderSource); gl.attachShader(program, vs); gl.attachShader(program, fs); gl.linkProgram(program); gl.useProgram(program);
+        const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+        const pLoc = gl.getAttribLocation(program, 'p'); gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
+        const tLoc = gl.getUniformLocation(program, 'iTime'); const rLoc = gl.getUniformLocation(program, 'iResolution');
+        function render(time) {
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight; gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.uniform1f(tLoc, time * 0.001); gl.uniform2f(rLoc, canvas.width, canvas.height);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+
+        // ====== 音乐控制逻辑 (包含音量滑块监听) ======
+        const bgm = document.getElementById('bgm');
+        const volSlider = document.getElementById('bgm-volume');
+        
+        // 赋予初始音量
+        bgm.volume = volSlider.value;
+        
+        // 监听滑块拖动实时调整音量
+        volSlider.addEventListener('input', function() {
+            bgm.volume = this.value;
+        });
+
+        function tryPlayBGM() {
+            if (bgm.paused) {
+                bgm.play().catch(e => {
+                    console.log("等待交互后播放BGM...");
+                });
+            }
+        }
+
+        function getTodayDateFormatted() { const today = new Date(); return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`; }
+
+        let selectedColorStr = "0, 255, 150"; 
+        document.querySelectorAll('.mood-dot').forEach(dot => {
+            dot.addEventListener('click', function() {
+                document.querySelectorAll('.mood-dot').forEach(d => d.classList.remove('active'));
+                this.classList.add('active');
+                selectedColorStr = this.getAttribute('data-color');
+            });
+        });
+
+        let dreamsDatabase = [
+            { id: "001", date: "2026.03.31", keyword: "深绿 · 玩咖", size: "170", color: "0, 255, 150", text: "复古的深绿色墙壁。啄了两下，氛围很暧昧，在那私密的房间里，在那深绿色的墙壁前，他自然而然亲了我。" },
+            { id: "002", date: "2026.03.20", keyword: "幽蓝 · 下坠", size: "140", color: "80, 200, 255", text: "失去重力，一直在没有尽头的深海中下坠。水很冷，但我感觉不到恐惧，只有一种绝对的宁静。" },
+            { id: "003", date: "2026.03.15", keyword: "绛紫 · 游乐园", size: "155", color: "200, 100, 255", text: "荒诞的游乐园里没有活人，只有生锈的木马在风中自己转动，发出刺耳的吱呀声。" }
+        ];
+        
+        let currentOpenDreamId = null;
+        let currentSortMode = 'time'; 
+
+        function switchView(viewId) {
+            tryPlayBGM();
+            document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
+            document.getElementById(viewId).classList.add('active');
+            if(viewId === 'view-library') renderLibrary(); 
+        }
+
+        function toggleInput(show) { 
+            tryPlayBGM();
+            const bubble = document.getElementById('input-bubble'); 
+            if(show) { 
+                bubble.classList.add('active'); 
+                document.getElementById('dream-date').value = getTodayDateFormatted();
+                document.getElementById('dream-keyword').focus(); 
+            } else { bubble.classList.remove('active'); } 
+        }
+
+        function setSortMode(mode) {
+            if(currentSortMode === mode) return; 
+            document.getElementById('mode-time').classList.remove('active');
+            document.getElementById('mode-color').classList.remove('active');
+            document.getElementById('mode-' + mode).classList.add('active');
+            currentSortMode = mode;
+            
+            const grid = document.getElementById('library-grid');
+            grid.style.opacity = 0;
+            setTimeout(() => {
+                renderLibrary();
+                grid.style.opacity = 1;
+            }, 300);
+        }
+
+        function saveDream() {
+            const keywordInput = document.getElementById('dream-keyword'); const textInput = document.getElementById('dream-text'); const intensityInput = document.getElementById('dream-intensity'); const dateInput = document.getElementById('dream-date');
+            if(textInput.value.trim() !== "") {
+                const newId = String(Date.now()).slice(-3);
+                let finalDate = dateInput.value ? dateInput.value.replace(/-/g, '.') : getTodayDateFormatted().replace(/-/g, '.');
+                dreamsDatabase.push({ id: newId, date: finalDate, keyword: keywordInput.value.trim() || "未命名碎片", text: textInput.value, color: selectedColorStr, size: intensityInput.value });
+                const op = textInput.placeholder; textInput.value = ""; keywordInput.value = ""; intensityInput.value = 170; textInput.placeholder = "已凝结成星云...";
+                setTimeout(() => { toggleInput(false); textInput.placeholder = op; }, 800);
+            }
+        }
+
+        function renderLibrary() {
+            const grid = document.getElementById('library-grid'); 
+            grid.innerHTML = ""; 
+            
+            let displayData = [...dreamsDatabase];
+            if (currentSortMode === 'time') {
+                displayData.sort((a, b) => b.date.localeCompare(a.date));
+            } else if (currentSortMode === 'color') {
+                displayData.sort((a, b) => a.color.localeCompare(b.color));
+            }
+
+            displayData.forEach(dream => {
+                const bubble = document.createElement('div'); bubble.className = 'lib-bubble';
+                bubble.id = `bubble-${dream.id}`; 
+                bubble.style.width = `${dream.size}px`; bubble.style.height = `${dream.size}px`;
+                bubble.style.background = `radial-gradient(circle at 30% 30%, rgba(255,255,255,0.08), rgba(${dream.color}, 0.10))`;
+                bubble.style.boxShadow = `0 0 40px rgba(${dream.color}, 0.5), inset 0 0 20px rgba(255,255,255,0.05), 0 2px 10px rgba(0,0,0,0.8)`;
+                bubble.innerHTML = `<div class="b-date"><span>${dream.date}</span></div><div class="b-key"><span>${dream.keyword}</span></div>`;
+                bubble.onclick = () => openArchiveCard(dream);
+                grid.appendChild(bubble);
+            });
+        }
+
+        function openArchiveCard(dream) {
+            currentOpenDreamId = dream.id; 
+            const card = document.getElementById('archive-card');
+            
+            card.style.borderColor = `rgba(${dream.color}, 0.3)`;
+            card.style.boxShadow = `0 0 70px rgba(${dream.color}, 0.2), inset 0 0 30px rgba(${dream.color}, 0.05), 0 0 80px rgba(0,0,0,0.95)`;
+            
+            document.getElementById('card-keyword').innerText = dream.keyword; 
+            document.getElementById('card-meta').innerText = `${dream.date} | #${dream.id}`; 
+            
+            const textContent = document.getElementById('card-text');
+            textContent.innerText = dream.text; 
+            textContent.scrollTop = 0; 
+            
+            document.getElementById('card-controls').style.opacity = '1';
+            document.getElementById('card-controls').style.pointerEvents = 'auto';
+
+            card.classList.add('active'); 
+        }
+
+        function hideArchive() { 
+            document.getElementById('archive-card').classList.remove('active'); 
+            currentOpenDreamId = null;
+        }
+
+        function fragmentText(element) {
+            const text = element.innerText;
+            element.innerHTML = ""; 
+            const charsData = []; 
+
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const span = document.createElement("span");
+                span.className = "particle";
+                span.innerText = char === " " ? "\u00A0" : char;
+                element.appendChild(span);
+                
+                charsData.push({
+                    el: span,
+                    delay: i * 0.01 + Math.random() * 0.08, 
+                    targetRise: 40 + Math.random() * 40,    
+                    targetDrift: (Math.random() - 0.5) * 20 
+                });
+            }
+            return charsData;
+        }
+
+        function animateTextDissolve(allCharsData, duration, callback) {
+            let start = null;
+            function step(timestamp) {
+                if (!start) start = timestamp;
+                const progress = (timestamp - start) / duration;
+                
+                allCharsData.forEach((data) => {
+                    let p = (progress - data.delay) / (1 - data.delay);
+                    p = Math.max(0, Math.min(1, p)); 
+
+                    if (p > 0) {
+                        const easeOut = p * (2 - p);
+                        const currentRise = easeOut * data.targetRise;
+                        const currentDrift = easeOut * data.targetDrift;
+                        
+                        data.el.style.transform = `translate(${currentDrift}px, -${currentRise}px) scale(${1 - p * 0.1})`;
+                        data.el.style.opacity = Math.max(0, 1 - Math.pow(p, 1.5) * 1.5);
+                        data.el.style.filter = `blur(${p * 4}px)`;
+                    }
+                });
+
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                } else if (callback) {
+                    callback();
+                }
+            }
+            window.requestAnimationFrame(step);
+        }
+
+        function animateCardFadeOut(cardElement, duration, callback) {
+            let start = null;
+            function step(timestamp) {
+                if (!start) start = timestamp;
+                const progress = (timestamp - start) / duration;
+                
+                cardElement.style.opacity = 1 - (progress * progress);
+                
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                } else if (callback) {
+                    callback();
+                }
+            }
+            window.requestAnimationFrame(step);
+        }
+
+        function deleteDream() {
+            if(confirm("遗忘不可逆转。确定要将这个碎片从星云中彻底抹除吗？")) {
+                const idToDelete = currentOpenDreamId; 
+                const card = document.getElementById('archive-card');
+                
+                document.getElementById('card-controls').style.opacity = '0';
+                document.getElementById('card-controls').style.pointerEvents = 'none';
+                
+                dreamsDatabase = dreamsDatabase.filter(dream => dream.id !== idToDelete);
+                renderLibrary(); 
+                
+                const kwData = fragmentText(document.getElementById('card-keyword'));
+                const metaData = fragmentText(document.getElementById('card-meta'));
+                const txtData = fragmentText(document.getElementById('card-text'));
+                const allCharsData = [...kwData, ...metaData, ...txtData];
+
+                animateTextDissolve(allCharsData, 2500, () => {
+                    animateCardFadeOut(card, 800, () => {
+                        card.classList.remove('active');
+                        card.style.opacity = ''; 
+                        currentOpenDreamId = null;
+                    });
+                });
+            }
+        }
+    </script>
+</body>
+</html>
